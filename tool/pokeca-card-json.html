@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width,initial-scale=1">
+	<title>ポケカ カードJSON変換</title>
+	<style>
+		:root {
+			color-scheme: light;
+			--bd: #8886;
+			--ac: #2f6f5e
+		}
+
+		* {
+			box-sizing: border-box
+		}
+
+		body {
+			font: 15px/1.7 system-ui, "Noto Sans JP", sans-serif;
+			max-width: 860px;
+			margin: 0 auto;
+			padding: 20px
+		}
+
+		h1 {
+			font-size: 20px;
+			margin: 0 0 4px
+		}
+
+		.sub {
+			opacity: .75;
+			margin: 0 0 12px;
+			font-size: 13px
+		}
+
+		label {
+			display: block;
+			font-weight: 600;
+			margin: 16px 0 4px
+		}
+
+		textarea,
+		input {
+			width: 100%;
+			padding: 8px;
+			border: 1px solid var(--bd);
+			border-radius: 6px;
+			background: transparent;
+			color: inherit;
+			font: 13px/1.5 ui-monospace, Consolas, monospace
+		}
+
+		textarea {
+			min-height: 100px;
+			resize: vertical
+		}
+
+		.row {
+			display: flex;
+			gap: 8px;
+			flex-wrap: wrap;
+			margin-top: 8px
+		}
+
+		button {
+			padding: 8px 14px;
+			border: 1px solid var(--bd);
+			border-radius: 6px;
+			background: transparent;
+			color: inherit;
+			cursor: pointer;
+			font: inherit
+		}
+
+		button:focus-visible,
+		textarea:focus-visible,
+		input:focus-visible {
+			outline: 2px solid var(--ac);
+			outline-offset: 1px
+		}
+
+		button.pri {
+			background: var(--ac);
+			border-color: var(--ac);
+			color: #fff
+		}
+
+		button:disabled {
+			opacity: .5;
+			cursor: default
+		}
+
+		#log {
+			font-size: 13px;
+			margin-top: 10px;
+			max-height: 140px;
+			overflow: auto
+		}
+
+		.err {
+			color: #c0392b
+		}
+
+		.tw {
+			overflow-x: auto
+		}
+
+		table {
+			border-collapse: collapse;
+			width: 100%;
+			font-size: 13px;
+			margin-top: 8px
+		}
+
+		td,
+		th {
+			border-bottom: 1px solid var(--bd);
+			padding: 4px 8px;
+			text-align: left;
+			white-space: nowrap
+		}
+
+		#out {
+			min-height: 240px
+		}
+
+		.chk {
+			display: flex;
+			gap: 6px;
+			align-items: center;
+			font-weight: 400;
+			margin: 8px 0 0
+		}
+
+		input[type=checkbox] {
+			width: auto
+		}
+
+		details {
+			margin-top: 20px;
+			font-size: 13px
+		}
+
+		pre {
+			overflow: auto;
+			padding: 10px;
+			border: 1px solid var(--bd);
+			border-radius: 6px;
+			font-size: 12px
+		}
+	</style>
+</head>
+
+<body>
+	<h1>ポケカ カードJSON変換</h1>
+	<p class="sub">公式のカード詳細ページから、カードデータをJSONにします。公式サイトへの負荷を避けるため、必要なカードだけを1秒間隔で取得します。</p>
+
+	<label for="deck">デッキコード、またはデッキ確認ページのリンク</label>
+	<input id="deck" placeholder="xxxxxx-xxxxxx-xxxxxx">
+	<label class="chk"><input type="checkbox" id="withCards" checked> 未取得のカード詳細もまとめて取得する（1秒間隔）</label>
+	<div class="row"><button id="goDeck" class="pri">デッキを取得</button></div>
+
+	<label for="urls">カード詳細のリンクまたはID（1行に1件）</label>
+	<textarea id="urls"
+		placeholder="https://www.pokemon-card.com/card-search/details.php/card/50919/regu/XY&#10;50912"></textarea>
+	<label for="proxy">プロキシURL（任意）</label>
+	<input id="proxy" placeholder="https://xxxx.workers.dev/?url=">
+	<div class="row"><button id="go" class="pri">取得してJSON化</button></div>
+
+	<label for="html">ページのHTMLソースを貼り付け（複数カード可）</label>
+	<textarea id="html" placeholder="ページのソースをそのまま貼り付け。複数ある場合は続けて貼り付けてOK"></textarea>
+	<div class="row"><button id="parseHtml">貼り付けを変換</button></div>
+
+	<div id="log"></div>
+	<div class="tw">
+		<table id="deckTbl"></table>
+	</div>
+	<div class="tw">
+		<table id="tbl"></table>
+	</div>
+
+	<label for="outDeck">デッキJSON（decks.json）</label>
+	<textarea id="outDeck" readonly></textarea>
+	<div class="row"><button id="copyDeck">コピー</button><button id="dlDeck">decks.jsonを保存</button></div>
+
+	<label for="out">カードJSON（cards.json）</label>
+	<textarea id="out" readonly></textarea>
+	<div class="row">
+		<button id="copy">コピー</button>
+		<button id="dl">cards.jsonを保存</button>
+		<button id="clear">クリア</button>
+	</div>
+
+	<details>
+		<summary>リンク取得が失敗するとき（CORS）</summary>
+		<p>ブラウザから公式サイトへ直接fetchすると、CORSで拒否されることがあります。その場合は、上の貼り付け欄を使うか、Cloudflare
+			Workers（無料枠）に次のコードを置き、そのURLを「プロキシURL」に入れてください。</p>
+		<pre>export default {
+  async fetch(req) {
+    const u = new URL(req.url).searchParams.get("url");
+    if (!u || !u.startsWith("https://www.pokemon-card.com/"))
+      return new Response("ng", { status: 400 });
+    const r = await fetch(u);
+    return new Response(r.body, { status: r.status, headers: {
+      "content-type": "text/html; charset=utf-8",
+      "access-control-allow-origin": "*" } });
+  }
+};</pre>
+		<p>IDだけを入れた場合は <code>regu/all</code> のURLで取得します。進化元は、現在のカードの1つ下の進化グループから推定した値です。</p>
+	</details>
+
+	<script>
+		const BASE = "https://www.pokemon-card.com";
+		const $ = id => document.getElementById(id);
+		const cards = new Map();
+
+		// 属性ID
+		const TYPE = { none: "colorless", evil: "dark" };
+		const NAME_TYPE = { 炎: "fire", 水: "water", 草: "grass", 雷: "lightning", 超: "psychic", 闘: "fighting", 悪: "dark", 鋼: "steel" };
+		const iconId = el => {
+			const c = [...el.classList].map(x => x.match(/^icon-(.+)$/)).find(Boolean);
+			return c ? (TYPE[c[1]] || c[1]) : null;
+		};
+		const icons = root => [...root.querySelectorAll(".icon")].map(iconId);
+		const clean = s => (s || "").replace(/\u00a0/g, " ").trim();
+		const num = s => parseInt(clean(s).replace(/[－−]/g, "-").replace(/[^\d-]/g, ""));
+		const esc = s => String(s ?? "").replace(/[&<>"]/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[m]));
+
+		// 改行 アイコン変換
+		function textOf(el) {
+			const c = el.cloneNode(true);
+			c.querySelectorAll("br").forEach(b => b.replaceWith("\n"));
+			c.querySelectorAll(".icon").forEach(i => i.replaceWith("{" + iconId(i) + "}"));
+			return clean(c.textContent).replace(/\n{3,}/g, "\n\n");
+		}
+
+		function parseDamage(s) {
+			if (!s) return null;
+			const m = clean(s).match(/^(\d+)\s*([＋+×x－-]?)$/);
+			return m ? { base: +m[1], mod: m[2] || null } : { raw: clean(s) };
+		}
+
+		function parseCell(td) {
+			const ic = td?.querySelector(".icon");
+			return ic ? { type: iconId(ic), value: num(td.textContent) } : null;
+		}
+
+		function parseStage(s) {
+			s = clean(s).replace(/\s/g, "");
+			if (s === "たね") return "basic";
+			const m = s.match(/^(\d)進化/);
+			return m ? "stage" + m[1] : s;
+		}
+
+		function parseCard(doc, fallbackId) {
+			const q = s => doc.querySelector(s);
+			const inner = q(".RightBox-inner");
+			if (!inner) throw new Error("カード詳細ページではありません");
+			const og = q('meta[property="og:url"]')?.content || "";
+			const id = +((og.match(/card\/(\d+)/) || [])[1] || fallbackId) || null;
+			const img = q(".LeftBox img.fit")?.getAttribute("src") || "";
+			const code = (img.match(/_([PTE])_/) || [])[1];
+			const tds = inner.querySelectorAll("table tr:nth-child(2) td");
+
+			// セクション分割
+			const attacks = [], abilities = [], rules = [], text = [], evo = [];
+			let sub = null, cur = null, last = null;
+			for (const el of inner.children) {
+				const tag = el.tagName;
+				if (tag === "H2") {
+					cur = clean(el.textContent);
+					last = null;
+					if (!["ワザ", "特性", "特別なルール", "進化"].includes(cur)) sub = cur;
+				} else if (tag === "H4" && (cur === "ワザ" || cur === "特性")) {
+					last = {
+						name: clean([...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join("")),
+						cost: icons(el),
+						damage: parseDamage(el.querySelector(".f_right")?.textContent),
+						text: ""
+					};
+					(cur === "ワザ" ? attacks : abilities).push(last);
+				} else if (tag === "P") {
+					const t = textOf(el);
+					if (!t) continue;
+					if (last) last.text += (last.text ? "\n" : "") + t;
+					else if (cur === "特別なルール") rules.push(t);
+					else text.push(t);
+				} else if (cur === "進化" && el.classList.contains("evolution")) {
+					evo.push({
+						names: [...el.querySelectorAll("a")].map(a => clean(a.textContent)),
+						current: el.matches(".ev_on") || !!el.querySelector(".ev_on")
+					});
+				}
+			}
+
+			const subtext = clean(q(".LeftBox .subtext")?.textContent);
+			const no = subtext.match(/(\d+)\s*\/\s*(\d+)/);
+			const name = clean(q("h1.Heading1")?.textContent);
+			const kind = code === "P" || q(".hp-num") ? "pokemon"
+				: code === "E" || /エネルギー/.test(sub || "") ? "energy" : "trainer";
+
+			const out = {
+				id, name, kind,
+				image: img ? new URL(img, BASE).href : null,
+				set: q(".img-regulation")?.getAttribute("alt") || null,
+				number: no ? { no: +no[1], total: +no[2] } : null
+			};
+
+			if (kind === "pokemon") {
+				const stage = parseStage(q(".TopInfo .type")?.textContent);
+				const gi = evo.findIndex(g => g.current);
+				const pz = rules.join("").match(/サイドを(\d)枚とる/);
+				const tIcon = q(".TopInfo .td-r .icon");
+				Object.assign(out, {
+					stage,
+					hp: num(q(".hp-num")?.textContent) || null,
+					type: tIcon ? iconId(tIcon) : null,
+					abilities, attacks,
+					weakness: parseCell(tds[0]),
+					resistance: parseCell(tds[1]),
+					retreat: tds[2] ? tds[2].querySelectorAll(".icon").length : 0,
+					evolvesFrom: stage === "basic" || gi < 0 || !evo[gi + 1] ? [] : evo[gi + 1].names,
+					evolution: evo.map(g => g.names),
+					rules,
+					prize: pz ? +pz[1] : 1
+				});
+			} else if (kind === "energy") {
+				const basic = sub === "基本エネルギー";
+				const bn = name.match(/^基本(.)エネルギー$/);
+				Object.assign(out, {
+					subtype: sub, basic,
+					provides: basic && bn ? NAME_TYPE[bn[1]] || null : null,
+					text, rules
+				});
+			} else {
+				Object.assign(out, {
+					subtype: sub, text, rules,
+					aceSpec: rules.some(r => /ACE SPEC/.test(r))
+				});
+			}
+			return out;
+		}
+
+		// 出力
+		const log = (m, err) => {
+			const d = document.createElement("div");
+			d.textContent = m;
+			if (err) d.className = "err";
+			$("log").appendChild(d);
+			$("log").scrollTop = 1e6;
+		};
+
+		function summary(c) {
+			if (c.kind === "pokemon") return `${c.stage} HP${c.hp} ${c.type} ワザ${c.attacks.length}`;
+			return c.subtype || "";
+		}
+
+		function render() {
+			const list = [...cards.values()];
+			$("out").value = list.length ? JSON.stringify(list, null, 2) : "";
+			$("tbl").innerHTML = list.length
+				? "<tr><th>ID</th><th>名前</th><th>種類</th><th>概要</th></tr>" +
+				list.map(c => `<tr><td>${esc(c.id)}</td><td>${esc(c.name)}</td><td>${c.kind}</td><td>${esc(summary(c))}</td></tr>`).join("")
+				: "";
+		}
+
+		function add(c) {
+			cards.set(c.id ?? c.name, c);
+			render();
+			log("OK: " + c.name);
+		}
+
+		// 取得
+		const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+		function toUrl(line) {
+			if (/^\d+$/.test(line)) return `${BASE}/card-search/details.php/card/${line}/regu/all`;
+			return /^https?:\/\//.test(line) ? line : null;
+		}
+
+		async function fetchDoc(url) {
+			const p = $("proxy").value.trim();
+			const res = await fetch(p ? p + encodeURIComponent(url) : url);
+			if (!res.ok) throw new Error("HTTP " + res.status);
+			return new DOMParser().parseFromString(await res.text(), "text/html");
+		}
+
+		$("go").onclick = async () => {
+			const lines = $("urls").value.split("\n").map(s => s.trim()).filter(Boolean);
+			if (!lines.length) return log("リンクかIDを入力してください", 1);
+			$("go").disabled = true;
+			for (const [i, line] of lines.entries()) {
+				const url = toUrl(line);
+				if (!url) { log("無効な入力: " + line, 1); continue; }
+				try {
+					add(parseCard(await fetchDoc(url), (url.match(/card\/(\d+)/) || [])[1]));
+				} catch (e) {
+					log(`失敗: ${line} (${e.message}) CORSの可能性があります。プロキシか貼り付けを使ってください`, 1);
+				}
+				if (i < lines.length - 1) await sleep(1000);
+			}
+			$("go").disabled = false;
+		};
+
+		$("parseHtml").onclick = () => {
+			const parts = $("html").value.split(/(?=<!DOCTYPE html>)/i).filter(s => s.trim());
+			if (!parts.length) return log("HTMLを貼り付けてください", 1);
+			for (const p of parts) {
+				try {
+					const d = new DOMParser().parseFromString(p, "text/html");
+					if (d.getElementById("deck_pke")) {
+						const dk = parseDeck(d);
+						addDeck(dk);
+						if (fillIds(dk).length) log("カードIDを入力欄に入れました。「取得してJSON化」を押してください");
+					} else add(parseCard(d));
+				}
+				catch (e) { log("変換失敗: " + e.message, 1); }
+			}
+		};
+
+		// デッキ
+		const decks = new Map();
+		const SECTIONS = { deck_pke: "pokemon", deck_gds: "goods", deck_tool: "tool", deck_tech: "tech", deck_sup: "supporter", deck_sta: "stadium", deck_ene: "energy", deck_ajs: "ajs" };
+
+		function parseDeck(doc) {
+			const src = [...doc.scripts].map(s => s.textContent).join("\n");
+			const names = {};
+			for (const m of src.matchAll(/searchItemNameAlt\[(\d+)\]='([^']*)'/g)) names[m[1]] = m[2];
+			const entries = [];
+			for (const [key, section] of Object.entries(SECTIONS)) {
+				const v = doc.getElementById(key)?.value || "";
+				for (const part of v.split("-").filter(Boolean)) {
+					const [id, count] = part.split("_").map(Number);
+					entries.push({ id, count, section, name: names[id] || null });
+				}
+			}
+			if (!entries.length) throw new Error("デッキ情報が見つかりません");
+			return {
+				code: doc.getElementById("copyDeckID")?.value || null,
+				total: entries.reduce((s, e) => s + e.count, 0),
+				entries
+			};
+		}
+
+		function renderDecks() {
+			const list = [...decks.values()];
+			$("outDeck").value = list.length ? JSON.stringify(list, null, 2) : "";
+			$("deckTbl").innerHTML = list.length
+				? "<tr><th>デッキコード</th><th>枚数</th><th>種類数</th></tr>" +
+				list.map(d => `<tr><td>${esc(d.code)}</td><td>${d.total}</td><td>${d.entries.length}</td></tr>`).join("")
+				: "";
+		}
+
+		function addDeck(d) {
+			decks.set(d.code || "deck" + decks.size, d);
+			renderDecks();
+			log(`OK: デッキ ${d.total}枚 ${d.entries.length}種類` + (d.total !== 60 ? "（60枚ではありません）" : ""), d.total !== 60);
+		}
+
+		// 未取得ID
+		function fillIds(d) {
+			const ids = [...new Set(d.entries.map(e => e.id))].filter(id => !cards.has(id));
+			$("urls").value = ids.join("\n");
+			return ids;
+		}
+
+		function deckCode(s) {
+			s = s.trim();
+			const m = s.match(/deckID\/([A-Za-z0-9-]+)/);
+			return m ? m[1] : /^[A-Za-z0-9-]+$/.test(s) ? s : null;
+		}
+
+		$("goDeck").onclick = async () => {
+			const code = deckCode($("deck").value);
+			if (!code) return log("デッキコードを入力してください", 1);
+			$("goDeck").disabled = true;
+			try {
+				let doc = null, err = null;
+				for (const p of ["result", "confirm"]) {
+					try {
+						const d = await fetchDoc(`${BASE}/deck/${p}.html/deckID/${code}/`);
+						if (d.getElementById("deck_pke")) { doc = d; break; }
+					} catch (e) { err = e; }
+				}
+				if (!doc) throw err || new Error("デッキ情報が見つかりません");
+				const dk = parseDeck(doc);
+				addDeck(dk);
+				if ($("withCards").checked && fillIds(dk).length) $("go").click();
+			} catch (e) {
+				log(`失敗: ${code} (${e.message}) CORSの可能性があります。プロキシか貼り付けを使ってください`, 1);
+			}
+			$("goDeck").disabled = false;
+		};
+
+		$("copyDeck").onclick = async () => {
+			try { await navigator.clipboard.writeText($("outDeck").value); }
+			catch { $("outDeck").select(); document.execCommand("copy"); }
+			log("コピーしました");
+		};
+
+		$("dlDeck").onclick = () => {
+			const a = document.createElement("a");
+			a.href = URL.createObjectURL(new Blob([$("outDeck").value], { type: "application/json" }));
+			a.download = "decks.json";
+			a.click();
+		};
+
+		$("copy").onclick = async () => {
+			try { await navigator.clipboard.writeText($("out").value); }
+			catch { $("out").select(); document.execCommand("copy"); }
+			log("コピーしました");
+		};
+
+		$("dl").onclick = () => {
+			const a = document.createElement("a");
+			a.href = URL.createObjectURL(new Blob([$("out").value], { type: "application/json" }));
+			a.download = "cards.json";
+			a.click();
+		};
+
+		$("clear").onclick = () => { cards.clear(); decks.clear(); render(); renderDecks(); $("log").innerHTML = ""; };
+	</script>
+</body>
+
+</html>

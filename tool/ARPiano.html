@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AR Piano</title>
+<style>
+:root{color-scheme:dark}
+html,body{margin:0;height:100%;background:#05070f;color:#e8f6ff;font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;overflow:hidden}
+canvas{position:fixed;inset:0;width:100%;height:100%;touch-action:none;display:block}
+#status{position:fixed;top:calc(env(safe-area-inset-top,0px) + 10px);left:50%;transform:translateX(-50%);padding:6px 14px;border-radius:999px;background:rgba(5,10,25,.72);font-size:13px;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
+#start{position:fixed;inset:0;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;background:rgba(5,7,15,.88);text-align:center;padding:24px}
+#start h1{margin:0;font-size:28px;letter-spacing:.04em}
+#start p{margin:0;max-width:440px;line-height:1.7;font-size:14px;color:#a9c4d6}
+button{font:inherit;color:#e8f6ff;background:rgba(0,229,255,.16);border:1px solid rgba(0,229,255,.7);border-radius:10px;padding:8px 14px;cursor:pointer}
+button:active{background:rgba(0,229,255,.4)}
+#big{font-size:17px;padding:12px 28px}
+#panel{position:fixed;left:0;right:0;bottom:0;padding:10px 12px calc(env(safe-area-inset-bottom,0px) + 10px);background:rgba(5,10,25,.72);backdrop-filter:blur(6px);display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:center;font-size:12px}
+#panel.hide .ctl{display:none}
+label{display:flex;align-items:center;gap:6px}
+input[type=range]{width:100px}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="status"></div>
+<div id="start">
+  <h1>AR Piano</h1>
+  <p>床にカメラを向けて、ピアノを置きたい場所の四隅をタップします。床の木目や模様を画像から追跡するので、傾きセンサーなしで、スマホを動かしても床に固定されたままです。指先で鍵盤に触れると音が鳴ります（タッチ・クリック・PCキーボードでもOK）。</p>
+  <button id="big">カメラで始める</button>
+  <button id="nocam">カメラなしで始める</button>
+</div>
+<div id="panel">
+  <button id="gear">⚙ 設定</button>
+  <button class="ctl" id="place">床に置き直す</button>
+  <button class="ctl" id="grid">グリッド</button>
+  <button class="ctl" id="mir">左右反転</button>
+  <button class="ctl" id="hand">手を登録</button>
+  <button class="ctl" id="mask">手の表示</button>
+  <label class="ctl">向き<input type="range" id="sr" min="-180" max="180" value="0"></label>
+  <label class="ctl">感度<input type="range" id="ss" min="1" max="9" value="5"></label>
+</div>
+<video id="vid" playsinline muted style="display:none"></video>
+<script>
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+const vid=document.getElementById('vid'),stat=document.getElementById('status');
+const sm=document.createElement('canvas'),sctx=sm.getContext('2d',{willReadFrequently:true});
+const $=id=>document.getElementById(id);
+let W=0,H=0,camOn=false,mirror=false,audio=null,showGrid=true;
+const SW=192,D=.4;let SH=256,SH0=0,kx=1,ky=1,P={s:5};
+let Hs=null,pts=[],lost=0,motion=0,frameN=0,inl=0,G=null,Gp=null,rgba=null;
+let placing=false,taps=[],tips=[];
+let rot=0,cs=1,sn=0,hm=null,enrolling=false,showMask=true,accN=0,bqN=0;
+
+// rectified floor patch
+const RW=132,RH=153,PX0=-.15,PY0=-.55,DX=1.3/132,RN=RW*RH;
+const cu=new Float32Array(3*RN),ref=new Float32Array(3*RN),racc=new Float32Array(3*RN);
+const valid=new Uint8Array(RN),refV=new Uint8Array(RN),lab=new Uint8Array(RN),que=new Int32Array(RN),acc=new Int32Array(RN),bq=new Int32Array(RN);
+let refState=0,refT=0,refN=0;
+
+// keys
+const NW=14,off=[0,2,4,5,7,9,11],keys=[];
+for(let i=0;i<NW;i++){
+  keys.push({midi:60+Math.floor(i/7)*12+off[i%7],black:false,i,u0:i/NW,u1:(i+1)/NW,
+    name:['C','D','E','F','G','A','B'][i%7]+(4+Math.floor(i/7)),src:{},miss:0});
+}
+for(let i=0;i<NW-1;i++){
+  if(![0,1,3,4,5].includes(i%7))continue;
+  const c=(i+1)/NW,bw=.6/NW;
+  keys.push({midi:keys[i].midi+1,black:true,wi:i,u0:c-bw/2,u1:c+bw/2,src:{},miss:0});
+}
+const whites=keys.filter(k=>!k.black),blacks=keys.filter(k=>k.black);
+
+// audio
+const active=new Map();
+function ensureAudio(){
+  if(!audio)audio=new (window.AudioContext||window.webkitAudioContext)();
+  if(audio.state!=='running')audio.resume();
+}
+function noteOn(k){
+  if(!audio||active.has(k.midi))return;
+  const t=audio.currentTime,f=440*Math.pow(2,(k.midi-69)/12);
+  const g=audio.createGain();g.connect(audio.destination);
+  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.32,t+.008);
+  g.gain.exponentialRampToValueAtTime(.001,t+3);
+  const oscs=[['triangle',1,.7],['sine',2,.25],['sine',3,.1]].map(([ty,mul,a])=>{
+    const o=audio.createOscillator(),og=audio.createGain();
+    o.type=ty;o.frequency.value=f*mul;og.gain.value=a;
+    o.connect(og);og.connect(g);o.start(t);return o;
+  });
+  active.set(k.midi,{g,oscs});
+}
+function noteOff(k){
+  const a=active.get(k.midi);if(!a)return;
+  const t=audio.currentTime;
+  a.g.gain.cancelScheduledValues(t);
+  a.g.gain.setValueAtTime(Math.max(a.g.gain.value,.001),t);
+  a.g.gain.exponentialRampToValueAtTime(.0005,t+.3);
+  a.oscs.forEach(o=>o.stop(t+.35));
+  active.delete(k.midi);
+}
+function setSrc(k,name,on){
+  k.src[name]=on;
+  const any=Object.values(k.src).some(Boolean);
+  if(any!==!!k.on){k.on=any;any?noteOn(k):noteOff(k);}
+}
+function releaseAll(){for(const k of keys)if(k.src.cam)setSrc(k,'cam',false);}
+
+// homography
+function mul3(a,b){const r=[];for(let i=0;i<3;i++)for(let j=0;j<3;j++)r.push(a[i*3]*b[j]+a[i*3+1]*b[3+j]+a[i*3+2]*b[6+j]);return r;}
+function inv3(m){
+  const [a,b,c,d,e,f,g,h,i]=m,A=e*i-f*h,B=-(d*i-f*g),C=d*h-e*g,det=a*A+b*B+c*C;
+  if(Math.abs(det)<1e-14)return null;const s=1/det;
+  return [A*s,-(b*i-c*h)*s,(b*f-c*e)*s,B*s,(a*i-c*g)*s,-(a*f-c*d)*s,C*s,-(a*h-b*g)*s,(a*e-b*d)*s];
+}
+function apply(M,x,y){
+  const w=M[6]*x+M[7]*y+M[8];if(Math.abs(w)<1e-12)return null;
+  return [(M[0]*x+M[1]*y+M[2])/w,(M[3]*x+M[4]*y+M[5])/w];
+}
+function norm(p){
+  let mx=0,my=0;for(const q of p){mx+=q[0];my+=q[1];}mx/=p.length;my/=p.length;
+  let d=0;for(const q of p)d+=Math.hypot(q[0]-mx,q[1]-my);d/=p.length;
+  const s=d>1e-9?Math.SQRT2/d:1;
+  return {m:[s,0,-s*mx,0,s,-s*my,0,0,1],i:[1/s,0,mx,0,1/s,my,0,0,1]};
+}
+function solveH(S,T){
+  const ns=norm(S),nd=norm(T),A=Array.from({length:8},()=>new Float64Array(9));
+  for(let k=0;k<S.length;k++){
+    const a=apply(ns.m,S[k][0],S[k][1]),b=apply(nd.m,T[k][0],T[k][1]);
+    const x=a[0],y=a[1],u=b[0],v=b[1];
+    for(const r of [[x,y,1,0,0,0,-x*u,-y*u,u],[0,0,0,x,y,1,-x*v,-y*v,v]])
+      for(let i=0;i<8;i++)for(let j=0;j<9;j++)A[i][j]+=r[i]*r[j];
+  }
+  for(let c=0;c<8;c++){
+    let p=c;for(let r=c+1;r<8;r++)if(Math.abs(A[r][c])>Math.abs(A[p][c]))p=r;
+    if(Math.abs(A[p][c])<1e-10)return null;
+    const t=A[c];A[c]=A[p];A[p]=t;
+    for(let r=0;r<8;r++){if(r===c)continue;const f=A[r][c]/A[c][c];for(let j=c;j<9;j++)A[r][j]-=f*A[c][j];}
+  }
+  const h=[];for(let i=0;i<8;i++)h.push(A[i][8]/A[i][i]);h.push(1);
+  return mul3(nd.i,mul3(h,ns.m));
+}
+function normH(M){
+  const w=M[6]*.5+M[7]*D/2+M[8];if(Math.abs(w)<1e-12)return M;
+  return M.map(v=>v/w);
+}
+function ransac(src,dst){
+  const n=src.length;let best=null,bc=0;
+  const err=(M,i)=>{const q=apply(M,src[i][0],src[i][1]);return q?Math.hypot(q[0]-dst[i][0],q[1]-dst[i][1]):99;};
+  for(let it=0;it<40;it++){
+    const idx=[];while(idx.length<4){const r=(Math.random()*n)|0;if(!idx.includes(r))idx.push(r);}
+    const M=solveH(idx.map(i=>src[i]),idx.map(i=>dst[i]));if(!M)continue;
+    let c=0;for(let i=0;i<n;i++)if(err(M,i)<1.2)c++;
+    if(c>bc){bc=c;best=M;}
+  }
+  if(!best||bc<10)return null;
+  const s=[],d=[];for(let i=0;i<n;i++)if(err(best,i)<1.2){s.push(src[i]);d.push(dst[i]);}
+  const M2=solveH(s,d)||best,keep=[];
+  for(let i=0;i<n;i++)if(err(M2,i)<2)keep.push(i);
+  return keep.length>=10?{H:M2,keep}:null;
+}
+
+// tracking
+const mc=new Float32Array(169);
+function match(x,y){
+  const xi=Math.round(x),yi=Math.round(y),R=6,hw=4,n=2*R+1;
+  if(xi<hw+R+1||yi<hw+R+1||xi>SW-hw-R-2||yi>SH-hw-R-2)return null;
+  let best=1e18,bx=0,by=0;
+  for(let dy=-R;dy<=R;dy++)for(let dx=-R;dx<=R;dx++){
+    let s=0;
+    for(let j=-hw;j<=hw;j++){
+      const a=(yi+j)*SW+xi-hw,b=(yi+j+dy)*SW+xi+dx-hw;
+      for(let i=0;i<=2*hw;i++)s+=Math.abs(Gp[a+i]-G[b+i]);
+    }
+    mc[(dy+R)*n+dx+R]=s;if(s<best){best=s;bx=dx;by=dy;}
+  }
+  if(Math.abs(bx)===R||Math.abs(by)===R)return null;
+  const c=(dx,dy)=>mc[(dy+R)*n+dx+R];
+  const sub=(m,z,p)=>{const d=m-2*z+p;return d>1e-6?.5*(m-p)/d:0;};
+  return [x+bx+sub(c(bx-1,by),best,c(bx+1,by)),y+by+sub(c(bx,by-1),best,c(bx,by+1))];
+}
+let ia,ib,ic;
+function addFeatures(){
+  const w=SW,h=SH,w1=w+1,Hi=inv3(Hs);if(!Hi)return;
+  if(!ia||ia.length!==w1*(h+1)){ia=new Float64Array(w1*(h+1));ib=new Float64Array(w1*(h+1));ic=new Float64Array(w1*(h+1));}
+  for(let y=0;y<h;y++){
+    let a=0,b=0,c=0;
+    for(let x=0;x<w;x++){
+      let gx=0,gy=0;
+      if(x>0&&x<w-1&&y>0&&y<h-1){gx=(G[y*w+x+1]-G[y*w+x-1])*.5;gy=(G[(y+1)*w+x]-G[(y-1)*w+x])*.5;}
+      a+=gx*gx;b+=gx*gy;c+=gy*gy;
+      const o=(y+1)*w1+x+1,u=y*w1+x+1;
+      ia[o]=ia[u]+a;ib[o]=ib[u]+b;ic[o]=ic[u]+c;
+    }
+  }
+  const S=(t,x0,y0,x1,y1)=>t[(y1+1)*w1+x1+1]-t[y0*w1+x1+1]-t[(y1+1)*w1+x0]+t[y0*w1+x0];
+  const cand=[],m=12;
+  for(let y=m;y<h-m;y+=2)for(let x=m;x<w-m;x+=2){
+    const q=apply(Hi,x,y);if(!q||q[0]<-1||q[0]>2||q[1]<-1.2||q[1]>1.6)continue;
+    const A=S(ia,x-2,y-2,x+2,y+2),B=S(ib,x-2,y-2,x+2,y+2),C=S(ic,x-2,y-2,x+2,y+2);
+    const e=(A+C)/2-Math.sqrt(((A-C)/2)**2+B*B);
+    if(e>150)cand.push([e,x,y]);
+  }
+  cand.sort((p,q)=>q[0]-p[0]);
+  const cw=Math.ceil(w/9),occ=new Uint8Array(cw*Math.ceil(h/9));
+  for(const p of pts){const o=((p[1]/9)|0)*cw+((p[0]/9)|0);if(o>=0&&o<occ.length)occ[o]=1;}
+  for(const c of cand){
+    if(pts.length>=110)break;
+    const o=((c[2]/9)|0)*cw+((c[1]/9)|0);if(occ[o])continue;
+    occ[o]=1;pts.push([c[1],c[2]]);
+  }
+}
+function trackStep(){
+  frameN++;
+  const src=[],dst=[];
+  for(const p of pts){const q=match(p[0],p[1]);if(q){src.push(p);dst.push(q);}}
+  const r=src.length>=10?ransac(src,dst):null;
+  if(r){
+    Hs=normH(mul3(r.H,Hs));lost=0;inl=r.keep.length;let m=0;
+    pts=r.keep.map(i=>{m+=Math.hypot(dst[i][0]-src[i][0],dst[i][1]-src[i][1]);return dst[i];});
+    motion=m/inl;
+  }else{lost++;pts=dst;motion=9;}
+  if(pts.length<70||frameN%20===0)addFeatures();
+}
+
+// hand detection on rectified floor
+function rectify(){
+  const M=Hs;let k=0;
+  for(let j=0;j<RH;j++){
+    const Y=PY0+j*DX;
+    for(let i=0;i<RW;i++,k++){
+      const X=PX0+i*DX,w=M[6]*X+M[7]*Y+M[8];
+      const x=(M[0]*X+M[1]*Y+M[2])/w,y=(M[3]*X+M[4]*Y+M[5])/w;
+      if(!(w>.04)||x<0||y<0||x>=SW-1||y>=SH-1){valid[k]=0;continue;}
+      valid[k]=1;
+      const o=(((y+.5)|0)*SW+((x+.5)|0))*4,r=rgba[o],g=rgba[o+1],b=rgba[o+2];
+      cu[k]=.299*r+.587*g+.114*b;
+      cu[RN+k]=128-.1687*r-.3313*g+.5*b;
+      cu[2*RN+k]=128+.5*r-.4187*g-.0813*b;
+    }
+  }
+}
+function toLoc(X,Y){const dx=X-.5,dy=Y-D/2;return [.5+dx*cs+dy*sn,D/2-dx*sn+dy*cs];}
+function PL(x,y){const dx=x-.5,dy=y-D/2;return P2S(.5+dx*cs-dy*sn,D/2+dx*sn+dy*cs);}
+function colorOK(y,cb,cr){
+  const a=(cb-hm.cb)/hm.scb,b=(cr-hm.cr)/hm.scr,c=(y-hm.y)/hm.sy;
+  return a*a+b*b<9&&Math.abs(c)<2.5;
+}
+function learnHand(){
+  if(bqN<40)return false;
+  let idx=Array.from(bq.subarray(0,bqN)),m=[0,0,0],s=[0,0,0];
+  for(let pass=0;pass<2;pass++){
+    m=[0,0,0];for(const p of idx){m[0]+=cu[p];m[1]+=cu[RN+p];m[2]+=cu[2*RN+p];}
+    m=m.map(v=>v/idx.length);
+    s=[0,0,0];for(const p of idx){s[0]+=(cu[p]-m[0])**2;s[1]+=(cu[RN+p]-m[1])**2;s[2]+=(cu[2*RN+p]-m[2])**2;}
+    s=s.map(v=>Math.sqrt(v/idx.length));
+    if(pass===0)idx=idx.filter(p=>Math.abs(cu[RN+p]-m[1])<2.5*Math.max(s[1],3)&&Math.abs(cu[2*RN+p]-m[2])<2.5*Math.max(s[2],3));
+    if(idx.length<30)return false;
+  }
+  hm={y:m[0],cb:m[1],cr:m[2],sy:Math.max(s[0],25),scb:Math.max(s[1],4),scr:Math.max(s[2],4),area:bqN};
+  return true;
+}
+function hitXY(X,Y){
+  if(X<0||X>1||Y<0||Y>D)return null;
+  const v=Y/D;
+  if(v<.6)for(const k of blacks)if(X>=k.u0&&X<=k.u1)return k;
+  return whites[Math.min(NW-1,Math.floor(X*NW))];
+}
+function detectStep(){
+  rectify();
+  if(refState===0){refState=1;refT=performance.now()+2500;}
+  if(refState===1){
+    const r=Math.ceil((refT-performance.now())/1000);
+    if(r>0){stat.textContent='手を画面の外へ… '+r;return;}
+    refState=2;refN=0;racc.fill(0);
+  }
+  if(refState===2){
+    for(let k=0;k<3*RN;k++)racc[k]+=cu[k];
+    if(++refN>=6){for(let k=0;k<3*RN;k++)ref[k]=racc[k]/6;refV.set(valid);refState=3;}
+    stat.textContent='床を読み取り中…';return;
+  }
+  if(lost>3||motion>2.5){
+    releaseAll();tips=[];bqN=0;accN=0;
+    stat.textContent=lost>3?'床を見失い中…ゆっくり動かすか置き直してね':'動き中…';return;
+  }
+  let gs=0,c=0;
+  for(let k=0;k<RN;k++)if(valid[k]&&refV[k]){const d=cu[k]-ref[k];if(d>-40&&d<40){gs+=d;c++;}}
+  gs=c?gs/c:0;
+  const T=50-4*P.s;
+  for(let k=0;k<RN;k++){
+    lab[k]=0;
+    if(!valid[k])continue;
+    if(!refV[k]){for(let t=0;t<3;t++)ref[t*RN+k]=cu[t*RN+k];refV[k]=1;continue;}
+    const y=cu[k],cb=cu[RN+k],cr=cu[2*RN+k];
+    const d=Math.abs(y-ref[k]-gs)+Math.abs(cb-ref[RN+k])+Math.abs(cr-ref[2*RN+k]);
+    if(d>T){if(!hm||enrolling||colorOK(y,cb,cr))lab[k]=1;}
+    else{ref[k]+=(y-gs-ref[k])*.04;ref[RN+k]+=(cb-ref[RN+k])*.04;ref[2*RN+k]+=(cr-ref[2*RN+k])*.04;}
+  }
+  tips=[];bqN=0;accN=0;
+  for(let s=0;s<RN;s++){
+    if(lab[s]!==1)continue;
+    let qh=0,qt=0,sx=0,sy=0;que[qt++]=s;lab[s]=2;
+    while(qh<qt){
+      const p=que[qh++],x=p%RW,y=(p/RW)|0;sx+=x;sy+=y;
+      if(x>0&&lab[p-1]===1){lab[p-1]=2;que[qt++]=p-1;}
+      if(x<RW-1&&lab[p+1]===1){lab[p+1]=2;que[qt++]=p+1;}
+      if(y>0&&lab[p-RW]===1){lab[p-RW]=2;que[qt++]=p-RW;}
+      if(y<RH-1&&lab[p+RW]===1){lab[p+RW]=2;que[qt++]=p+RW;}
+    }
+    if(qt>bqN){bq.set(que.subarray(0,qt));bqN=qt;}
+    if(enrolling||qt<Math.max(20,hm?hm.area*.25:20))continue;
+    for(let n=0;n<qt;n++)acc[accN++]=que[n];
+    const cx=sx/qt,cy=sy/qt,req=Math.sqrt(qt/Math.PI),bd=new Float32Array(24),bi=new Int32Array(24).fill(-1);
+    let mx=0;
+    for(let n=0;n<qt;n++){
+      const p=que[n],x=p%RW,y=(p/RW)|0;
+      if(x<2||y<2||x>RW-3||y>RH-3)continue;
+      const d=Math.hypot(x-cx,y-cy),b=Math.min(23,Math.floor((Math.atan2(y-cy,x-cx)+Math.PI)/(2*Math.PI)*24));
+      if(d>bd[b]){bd[b]=d;bi[b]=p;}
+      if(d>mx)mx=d;
+    }
+    for(let b=0;b<24;b++){
+      if(bi[b]<0||bd[b]<req*1.35||bd[b]<mx*.6)continue;
+      if(bd[b]<bd[(b+23)%24]||bd[b]<bd[(b+1)%24])continue;
+      const p=bi[b];tips.push([PX0+(p%RW+.5)*DX,PY0+(((p/RW)|0)+.5)*DX]);
+    }
+  }
+  if(enrolling){releaseAll();stat.textContent=bqN>=40?'緑が認識した手。OKなら「この手で登録」':'手をピアノの上に見せてね（袖は映さない）';return;}
+  const down=new Set();
+  for(const t of tips){const q=toLoc(t[0],t[1]),k=hitXY(q[0],q[1]);if(k)down.add(k);}
+  for(const k of keys){
+    if(down.has(k)){k.miss=0;setSrc(k,'cam',true);}
+    else if(k.src.cam&&++k.miss>2)setSrc(k,'cam',false);
+  }
+  if(!placing)stat.textContent='指先で弾いてね｜床を追跡中（'+inl+'点）';
+}
+
+// draw
+function P2S(X,Y){
+  const w=Hs[6]*X+Hs[7]*Y+Hs[8];if(w<.04)return null;
+  return [(Hs[0]*X+Hs[1]*Y+Hs[2])/w*kx,(Hs[3]*X+Hs[4]*Y+Hs[5])/w*ky];
+}
+function path(p){ctx.beginPath();p.forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]));ctx.closePath();}
+function qd(x0,x1,y0,y1,l=0){
+  const p=[PL(x0,y0),PL(x1,y0),PL(x1,y1),PL(x0,y1)];
+  if(p.some(q=>!q))return null;
+  if(l)p.forEach(q=>{q[1]-=l;});
+  return p;
+}
+function seg(X0,Y0,X1,Y1){
+  const M=Hs,e=.05,w0=M[6]*X0+M[7]*Y0+M[8],w1=M[6]*X1+M[7]*Y1+M[8];
+  if(w0<e&&w1<e)return;
+  if(w0<e){const t=(e-w0)/(w1-w0);X0+=(X1-X0)*t;Y0+=(Y1-Y0)*t;}
+  else if(w1<e){const t=(e-w1)/(w0-w1);X1+=(X0-X1)*t;Y1+=(Y0-Y1)*t;}
+  const a=P2S(X0,Y0),b=P2S(X1,Y1);
+  if(a&&b){ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);}
+}
+function drawGrid(){
+  ctx.shadowBlur=0;ctx.lineWidth=1;
+  for(let pass=0;pass<2;pass++){
+    ctx.beginPath();
+    for(let i=-10;i<=20;i++){if((i%5===0)===(pass===1))seg(i*.1,-1.2,i*.1,1.6);}
+    for(let j=-12;j<=16;j++){if((j%5===0)===(pass===1))seg(-1,j*.1,2,j*.1);}
+    ctx.strokeStyle=pass?'rgba(0,229,255,.75)':'rgba(0,229,255,.32)';ctx.stroke();
+  }
+}
+function drawPiano(){
+  ctx.lineWidth=1.5;
+  let q=qd(-.03,1.03,-.1,D+.1);
+  if(q){path(q);ctx.shadowBlur=0;ctx.fillStyle='rgba(0,229,255,.08)';ctx.strokeStyle='rgba(0,229,255,.5)';ctx.setLineDash([6,5]);ctx.fill();ctx.stroke();ctx.setLineDash([]);}
+  for(const k of whites){
+    q=qd(k.u0+.0015,k.u1-.0015,0,D);if(!q)continue;
+    path(q);
+    ctx.fillStyle=k.on?'rgba(0,229,255,.6)':'rgba(255,255,255,.3)';
+    ctx.strokeStyle='rgba(255,255,255,.8)';
+    ctx.shadowColor='#00e5ff';ctx.shadowBlur=k.on?28:6;ctx.fill();ctx.stroke();
+  }
+  for(const k of blacks){
+    const mx=(k.u0+k.u1)/2,a=PL(mx,0),b=PL(mx,.6*D);
+    const L=a&&b?Math.hypot(a[0]-b[0],a[1]-b[1])*.16:0;
+    const f0=PL(k.u0,.6*D),f1=PL(k.u1,.6*D);
+    if(f0&&f1){path([f0,f1,[f1[0],f1[1]-L],[f0[0],f0[1]-L]]);ctx.shadowBlur=0;ctx.fillStyle='rgba(0,40,60,.75)';ctx.fill();}
+    q=qd(k.u0,k.u1,0,.6*D,L);if(!q)continue;
+    path(q);
+    ctx.fillStyle=k.on?'rgba(255,64,160,.85)':'rgba(10,14,30,.7)';
+    ctx.strokeStyle='rgba(0,229,255,.9)';
+    ctx.shadowColor=k.on?'#ff40a0':'#00e5ff';ctx.shadowBlur=k.on?28:8;ctx.fill();ctx.stroke();
+  }
+  ctx.shadowBlur=0;ctx.fillStyle='rgba(255,255,255,.85)';ctx.textAlign='center';
+  for(const k of whites){
+    if(k.i%7)continue;
+    const a=PL(k.u0,.88*D),b=PL(k.u1,.88*D),c=PL((k.u0+k.u1)/2,.88*D);
+    if(!a||!b||!c)continue;
+    ctx.font=Math.max(9,Math.hypot(a[0]-b[0],a[1]-b[1])*.35)+'px system-ui';
+    ctx.fillText(k.name,c[0],c[1]);
+  }
+  ctx.fillStyle='#ffe14d';
+  for(const t of tips){const p=P2S(t[0],t[1]);if(p){ctx.beginPath();ctx.arc(p[0],p[1],6,0,7);ctx.fill();}}
+}
+function drawMask(){
+  if(!showMask)return;
+  const n=enrolling?bqN:accN,src=enrolling?bq:acc;
+  ctx.shadowBlur=0;ctx.fillStyle='rgba(60,255,120,.45)';
+  for(let i=0;i<n;i+=2){
+    const p=src[i],q=P2S(PX0+(p%RW+.5)*DX,PY0+(((p/RW)|0)+.5)*DX);
+    if(q)ctx.fillRect(q[0]-2.5,q[1]-2.5,5,5);
+  }
+}
+function drawTaps(){
+  ctx.shadowBlur=0;ctx.strokeStyle='#ffe14d';ctx.fillStyle='#ffe14d';ctx.lineWidth=2;
+  ctx.beginPath();taps.forEach((t,i)=>i?ctx.lineTo(t[0]*kx,t[1]*ky):ctx.moveTo(t[0]*kx,t[1]*ky));ctx.stroke();
+  taps.forEach(t=>{ctx.beginPath();ctx.arc(t[0]*kx,t[1]*ky,7,0,7);ctx.fill();});
+}
+function drawCover(c,w,h){
+  if(!camOn||!vid.videoWidth)return false;
+  const sc=Math.max(w/vid.videoWidth,h/vid.videoHeight),dw=vid.videoWidth*sc,dh=vid.videoHeight*sc;
+  c.save();if(mirror){c.translate(w,0);c.scale(-1,1);}
+  c.drawImage(vid,(w-dw)/2,(h-dh)/2,dw,dh);c.restore();return true;
+}
+function grab(){
+  if(!drawCover(sctx,SW,SH))return false;
+  rgba=sctx.getImageData(0,0,SW,SH).data;
+  const N=SW*SH;
+  if(!G||G.length!==N){G=new Float32Array(N);Gp=new Float32Array(N);}
+  const t=Gp;Gp=G;G=t;
+  for(let i=0,j=0;j<N;i+=4,j++)G[j]=rgba[i]*.299+rgba[i+1]*.587+rgba[i+2]*.114;
+  return true;
+}
+function frame(){
+  ctx.clearRect(0,0,W,H);
+  const ok=drawCover(ctx,W,H);
+  if(!ok){
+    const gr=ctx.createLinearGradient(0,0,0,H);gr.addColorStop(0,'#0a1230');gr.addColorStop(1,'#05070f');
+    ctx.fillStyle=gr;ctx.fillRect(0,0,W,H);
+  }
+  if(ok&&grab()&&Hs&&!placing){trackStep();detectStep();}
+  if(Hs){if(showGrid)drawGrid();drawPiano();drawMask();}
+  if(placing)drawTaps();
+  requestAnimationFrame(frame);
+}
+
+// placement
+const PR=['左奥','右奥','右手前','左手前'];
+function prompt(){stat.textContent='床に置く位置：'+(taps.length+1)+'/4 ピアノの'+PR[taps.length]+'の角をタップ';}
+function startPlacing(){placing=true;taps=[];Hs=null;pts=[];tips=[];refState=0;releaseAll();prompt();}
+function defPlane(){
+  Hs=normH(solveH([[0,0],[1,0],[1,D],[0,D]],[[.2*SW,.45*SH],[.8*SW,.45*SH],[.95*SW,.7*SH],[.05*SW,.7*SH]]));
+}
+function finishPlace(){
+  const M=solveH([[0,0],[1,0],[1,D],[0,D]],taps);
+  placing=false;
+  if(!M){startPlacing();stat.textContent='うまく置けなかった。もう一度タップしてね';return;}
+  Hs=normH(M);pts=[];lost=0;motion=0;refState=0;bqN=0;accN=0;enrolling=!hm;
+  $('hand').textContent=enrolling?'この手で登録':'手を登録し直す';
+  if(G)addFeatures();
+}
+
+// events
+function resize(){
+  const d=window.devicePixelRatio||1;W=innerWidth;H=innerHeight;
+  cv.width=W*d;cv.height=H*d;ctx.setTransform(d,0,0,d,0,0);
+  const n=Math.max(64,Math.round(SW*H/W));
+  if(!SH0||Math.abs(n/SH0-1)>.1){
+    SH0=SH=n;sm.width=SW;sm.height=SH;
+    if(Hs||placing){camOn?startPlacing():defPlane();}
+  }
+  kx=W/SW;ky=H/SH;
+}
+addEventListener('resize',resize);
+const ptrs=new Map();
+cv.addEventListener('pointerdown',e=>{
+  ensureAudio();
+  if(placing){taps.push([e.clientX/kx,e.clientY/ky]);if(taps.length===4)finishPlace();else prompt();return;}
+  if(!Hs)return;
+  const Hi=inv3(Hs),q=Hi&&apply(Hi,e.clientX/kx,e.clientY/ky),l=q&&toLoc(q[0],q[1]),k=l&&hitXY(l[0],l[1]);
+  if(k){ptrs.set(e.pointerId,k);setSrc(k,'p'+e.pointerId,true);cv.setPointerCapture(e.pointerId);}
+});
+function pup(e){const k=ptrs.get(e.pointerId);if(k){setSrc(k,'p'+e.pointerId,false);ptrs.delete(e.pointerId);}}
+cv.addEventListener('pointerup',pup);cv.addEventListener('pointercancel',pup);
+const kbW='asdfghjkl;',kbB={w:0,e:1,t:3,y:4,u:5,o:7,p:8};
+function kbKey(e){
+  const c=e.key.toLowerCase(),i=kbW.indexOf(c);
+  if(i>=0)return whites[i];
+  if(c in kbB)return blacks.find(k=>k.wi===kbB[c]);
+}
+addEventListener('keydown',e=>{if(e.repeat)return;const k=kbKey(e);if(k){ensureAudio();setSrc(k,'kb',true);}});
+addEventListener('keyup',e=>{const k=kbKey(e);if(k)setSrc(k,'kb',false);});
+
+async function startCam(){
+  try{
+    const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280}},audio:false});
+    vid.srcObject=s;await vid.play();camOn=true;
+    mirror=s.getVideoTracks()[0].getSettings().facingMode==='user';
+    startPlacing();
+  }catch(err){defPlane();stat.textContent='カメラ不可（'+(err&&err.name||'unknown')+'）：タッチ／クリック／キーボードで弾けるよ';}
+}
+$('big').onclick=()=>{ensureAudio();$('start').remove();startCam();};
+$('nocam').onclick=()=>{ensureAudio();$('start').remove();defPlane();stat.textContent='タッチ／クリック／キーボード（A S D F…）で演奏';};
+$('place').onclick=()=>{if(camOn)startPlacing();};
+$('grid').onclick=()=>{showGrid=!showGrid;};
+$('mir').onclick=()=>{mirror=!mirror;if(camOn)startPlacing();};
+$('gear').onclick=()=>$('panel').classList.toggle('hide');
+$('ss').oninput=e=>{P.s=+e.target.value;};
+$('sr').oninput=e=>{rot=+e.target.value*Math.PI/180;cs=Math.cos(rot);sn=Math.sin(rot);};
+$('mask').onclick=()=>{showMask=!showMask;};
+$('hand').onclick=()=>{
+  if(!Hs||!camOn)return;
+  if(enrolling){
+    if(learnHand()){
+      enrolling=false;
+      try{localStorage.setItem('arp_hand',JSON.stringify(hm));}catch(e){}
+      stat.textContent='登録OK：緑が認識した手だよ';
+    }else stat.textContent='手がうまく見つからないよ。もう少し大きく見せてね';
+  }else{enrolling=true;releaseAll();}
+  $('hand').textContent=enrolling?'この手で登録':'手を登録し直す';
+};
+try{const sv=localStorage.getItem('arp_hand');if(sv)hm=JSON.parse(sv);}catch(e){}
+resize();frame();
+</script>
+</body>
+</html>

@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width,initial-scale=1">
+	<title>ポケカ対戦</title>
+	<style>
+		:root {
+			color-scheme: light;
+			--bd: #8886;
+			--ac: #2f6f5e;
+		}
+
+		* {
+			box-sizing: border-box
+		}
+
+		body {
+			font: 14px/1.5 system-ui, "Noto Sans JP", sans-serif;
+			margin: 0 auto;
+			padding: 12px;
+			max-width: 1000px
+		}
+
+		h1 {
+			font-size: 18px;
+			margin: 0 0 8px
+		}
+
+		h2 {
+			font-size: 13px;
+			margin: 10px 0 2px;
+			opacity: .7
+		}
+
+		button,
+		select {
+			font: inherit;
+			padding: 6px 10px;
+			border: 1px solid var(--bd);
+			border-radius: 6px;
+			background: transparent;
+			color: inherit;
+			cursor: pointer
+		}
+
+		button:focus-visible {
+			outline: 2px solid var(--ac)
+		}
+
+		button:disabled {
+			opacity: .4;
+			cursor: default
+		}
+
+		button.pri {
+			background: var(--ac);
+			border-color: var(--ac);
+			color: #fff
+		}
+
+		.row {
+			display: flex;
+			gap: 8px;
+			flex-wrap: wrap;
+			align-items: flex-start;
+			margin: 6px 0
+		}
+
+		.sub {
+			opacity: .75;
+			font-size: 13px
+		}
+
+		#bar {
+			padding: 6px 0;
+			border-bottom: 1px solid var(--bd)
+		}
+
+		.field {
+			display: grid;
+			grid-template-columns: 84px 1fr 84px;
+			gap: 8px;
+			align-items: start;
+			margin: 6px 0
+		}
+
+		.pile {
+			border: 2px dashed #888;
+			border-radius: 8px;
+			padding: 6px;
+			text-align: center;
+			font-size: 12px;
+			background: #eee;
+			color: #222
+		}
+
+		.pile.prize {
+			background: #bff;
+			border: 2px solid #4cc
+		}
+
+		.pile.deck {
+			border-color: #e33;
+			background: #fdd
+		}
+
+		.pile button {
+			margin-top: 4px;
+			font-size: 11px;
+			padding: 2px 6px;
+			color: #222
+		}
+
+		.zone {
+			display: flex;
+			flex-direction: column;
+			gap: 8px
+		}
+
+		.bench {
+			display: grid;
+			grid-template-columns: repeat(5, 1fr);
+			gap: 6px;
+			border: 3px dashed #5a3;
+			border-radius: 8px;
+			padding: 5px;
+			background: #cf9
+		}
+
+		.act {
+			display: flex;
+			gap: 8px;
+			align-items: flex-start;
+			border: 3px dashed #eb0;
+			border-radius: 8px;
+			padding: 5px;
+			background: #fe9;
+			min-height: 150px;
+			color: #222
+		}
+
+		.mon {
+			position: relative;
+			aspect-ratio: 63/88;
+			background: #fff8;
+			border: 1px solid #8886;
+			border-radius: 6px;
+			overflow: hidden;
+			color: #222;
+			font-size: 11px;
+			cursor: pointer
+		}
+
+		.act .mon {
+			width: 105px;
+			flex: none
+		}
+
+		.mon img {
+			width: 100%;
+			height: 100%;
+			object-fit: cover;
+			display: block
+		}
+
+		.mon.empty {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			opacity: .5;
+			cursor: default
+		}
+
+		.ov {
+			position: absolute;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			background: #000b;
+			color: #fff;
+			padding: 1px 3px
+		}
+
+		.ov u {
+			text-decoration: none;
+			background: #c33;
+			border-radius: 3px;
+			margin-left: 2px;
+			padding: 0 2px
+		}
+
+		.e {
+			display: inline-block;
+			font-style: normal;
+			border: 1px solid #fff8;
+			border-radius: 50%;
+			width: 16px;
+			height: 16px;
+			text-align: center;
+			line-height: 14px;
+			margin: 1px;
+			font-size: 10px
+		}
+
+		.row.hand {
+			border: 3px dashed #58e;
+			border-radius: 8px;
+			background: #bcd7ff;
+			padding: 6px;
+			overflow-x: auto;
+			flex-wrap: nowrap;
+			color: #222
+		}
+
+		.hand .c {
+			flex: none;
+			width: 84px;
+			font-size: 11px;
+			text-align: center;
+			cursor: pointer
+		}
+
+		.hand img {
+			width: 84px;
+			border-radius: 4px;
+			display: block
+		}
+
+		#log {
+			font-size: 12px;
+			max-height: 180px;
+			overflow: auto;
+			border-top: 1px solid var(--bd);
+			margin-top: 10px;
+			padding-top: 6px
+		}
+
+		#modal {
+			position: fixed;
+			inset: 0;
+			background: #0008;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			z-index: 9
+		}
+
+		#modal[hidden] {
+			display: none
+		}
+
+		.box {
+			background: Canvas;
+			color: CanvasText;
+			padding: 16px;
+			border-radius: 10px;
+			max-width: 92vw;
+			max-height: 88vh;
+			overflow: auto
+		}
+
+		.grid {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 6px;
+			margin: 8px 0
+		}
+
+		.grid .on {
+			background: var(--ac);
+			color: #fff
+		}
+
+		.dt {
+			display: flex;
+			gap: 16px;
+			flex-wrap: wrap
+		}
+
+		.big {
+			width: 250px;
+			border-radius: 10px;
+			display: block
+		}
+
+		.side {
+			flex: 1;
+			min-width: 240px;
+			max-width: 420px
+		}
+
+		.side p {
+			margin: 6px 0;
+			font-size: 13px
+		}
+
+		.opt {
+			display: flex;
+			gap: 8px;
+			align-items: center;
+			margin: 6px 0
+		}
+	</style>
+</head>
+
+<body>
+	<div id="setup">
+		<h1>ポケカ対戦</h1>
+		<p class="sub">変換ツールで作った cards.json と decks.json を選んでください（複数選択可）。読み込んだデータはこのブラウザに保存されます。</p>
+		<input type="file" id="files" accept=".json" multiple>
+		<p id="info" class="sub"></p>
+		<label>プロキシURL（画像の読み込み用） <input id="proxy" placeholder="https://xxxx.workers.dev/?url="
+				style="width:100%;padding:6px"></label>
+		<div class="row">
+			<label>あなたのデッキ <select id="myDeck"></select></label>
+			<label>AIのデッキ <select id="aiDeck"></select></label>
+		</div>
+		<button id="start" class="pri">対戦開始</button>
+		<p id="msg" style="color:#c0392b"></p>
+	</div>
+	<div id="game" hidden>
+		<div id="bar"></div>
+		<h2>相手</h2>
+		<div id="opp"></div>
+		<h2>あなた</h2>
+		<div id="mine"></div>
+		<h2>手札</h2>
+		<div id="hand" class="row hand"></div>
+		<div id="log"></div>
+	</div>
+	<div id="modal" hidden></div>
+
+	<script>
+		const $ = id => document.getElementById(id);
+		const N = t => t === "lightning" ? "electric" : t;
+		const TL = { grass: "草", fire: "炎", water: "水", electric: "雷", psychic: "超", fighting: "闘", dark: "悪", steel: "鋼", dragon: "竜", fairy: "妖", colorless: "無" };
+		const SCL = { poison: "毒", burn: "火", sleep: "眠", para: "痺", conf: "混" };
+		const SCN = { どく: "poison", やけど: "burn", ねむり: "sleep", マヒ: "para", こんらん: "conf" };
+		let CARDS = new Map(), DECKS = [], S = null, uid = 0, busy = false;
+		const sh = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0;[a[i], a[j]] = [a[j], a[i]]; } return a; };
+		const fmt = t => String(t).replace(/\{(\w+)\}/g, (_, k) => `【${TL[N(k)] || k}】`);
+		const log = m => S.log.unshift(m);
+		const msg = m => $("msg").textContent = m;
+		const flip = () => Math.random() < .5;
+
+		// データ読み込み
+		function ingest(list) {
+			for (const x of list) {
+				if (x.entries) DECKS = DECKS.filter(d => d.code !== x.code).concat(x);
+				else CARDS.set(x.id, x);
+			}
+		}
+		function save() { try { localStorage.setItem("pk", JSON.stringify({ c: [...CARDS.values()], d: DECKS })); } catch { } }
+		function fill() {
+			const o = DECKS.map(d => `<option value="${d.code}">${d.code}（${d.total}枚）</option>`).join("");
+			$("myDeck").innerHTML = o; $("aiDeck").innerHTML = o;
+			$("info").textContent = `カード ${CARDS.size}種 / デッキ ${DECKS.length}件`;
+		}
+		try { const o = JSON.parse(localStorage.getItem("pk") || "null"); if (o) { ingest(o.c); ingest(o.d); } } catch { }
+		fill();
+		$("files").onchange = async e => {
+			for (const f of e.target.files) { try { ingest(JSON.parse(await f.text())); } catch { msg(f.name + " を読めません"); } }
+			save(); fill();
+		};
+
+		// 基本ルール
+		const isB = c => c.kind === "pokemon" && c.stage === "basic";
+		const mons = P => [P.act, ...P.bench].filter(Boolean);
+		const idx = P => S.p.indexOf(P);
+		const cur = () => S.p[S.cur], opp = () => S.p[1 - S.cur];
+		const full = P => P.bench.length >= 5;
+		const hpLeft = m => m.c.hp - m.d;
+		const draw = (P, n = 1) => { let k = 0; while (n-- > 0 && P.deck.length) { P.hand.push(P.deck.shift()); k++; } return k; };
+		const mkP = (deck, ai) => ({ ai, deck: sh(deck), hand: [], prize: [], act: null, bench: [], dis: [], turns: 0, en: 0, sup: 0, ret: 0, ab: {}, kod: -9 });
+		const mk = (P, h) => ({ c: h.c, u: h, d: 0, en: [], pt: P.turns, ev: 0, under: [], lock: 0, nr: 0, sc: {}, tool: null });
+		const rm = (P, h) => P.hand.splice(P.hand.indexOf(h), 1);
+		const benchIt = (P, h) => { rm(P, h); P.bench.push(mk(P, h)); };
+		const attach = (P, m, h) => { rm(P, h); m.en.push(h); P.en = 1; };
+		const trash = (P, m) => P.dis.push(m.u, ...m.under, ...m.en, ...(m.tool ? [m.tool] : []));
+
+		function canEvo(P, m, h) {
+			const c = h.c;
+			return c.kind === "pokemon" && c.stage !== "basic" && (c.evolvesFrom || []).includes(m.c.name)
+				&& m.pt < P.turns && m.ev !== P.turns && !(S.first === idx(P) && P.turns === 1);
+		}
+		function evolve(P, m, h) { rm(P, h); m.under.push(m.u); m.u = h; m.c = h.c; m.ev = P.turns; m.sc = {}; log(`${m.c.name}に進化`); }
+		function swap(P, m) {
+			const i = P.bench.indexOf(m);
+			if (i < 0) return;
+			const a = P.act; a.sc = {}; P.bench.splice(i, 1, a); P.act = m;
+		}
+
+		function pay(m, cost) {
+			const t = m.en.map(e => N(e.c.provides || "colorless")), need = {};
+			let col = 0, rest = t.length;
+			for (const c of cost) { if (c === "colorless") col++; else { const k = N(c); need[k] = (need[k] || 0) + 1; } }
+			for (const k in need) { if (t.filter(x => x === k).length < need[k]) return false; rest -= need[k]; }
+			return rest >= col;
+		}
+		function canAtk(P, i) {
+			const a = P.act, at = a && a.c.attacks[i];
+			if (!at || a.lock === P.turns || a.sc.sleep || a.sc.para) return false;
+			if (S.first === idx(P) && P.turns === 1) return false;
+			return pay(a, at.cost);
+		}
+		const canRet = P => P.act && !P.ret && P.bench.length && P.act.en.length >= P.act.c.retreat && !P.act.sc.sleep && !P.act.sc.para && P.act.nr !== P.turns;
+
+		// 選択モーダル
+		function choose(t, items, n = 1, exact = true) {
+			if (!items.length) return Promise.resolve([]);
+			const need = exact ? Math.min(n, items.length) : 0;
+			return new Promise(res => {
+				const sel = [], M = $("modal");
+				M.hidden = false; M.onclick = null;
+				const paint = () => {
+					M.innerHTML = `<div class="box"><h3>${t}${n > 1 ? `（${sel.length}/${n}）` : ""}</h3><div class="grid">${items.map((x, i) =>
+						`<button data-i="${i}" class="${sel.includes(x) ? "on" : ""}">${x.c.name}${x.d !== undefined ? ` ${hpLeft(x)}/${x.c.hp}` : ""}</button>`).join("")}</div>${n > 1 || !exact ? `<button id="ok" ${sel.length >= need && sel.length <= n ? "" : "disabled"}>決定</button>` : ""}</div>`;
+					M.querySelectorAll(".grid button").forEach(b => b.onclick = () => {
+						const x = items[b.dataset.i], k = sel.indexOf(x);
+						if (k >= 0) sel.splice(k, 1); else if (sel.length < n) sel.push(x);
+						if (n === 1 && exact) { M.hidden = true; res([x]); } else paint();
+					});
+					const ok = M.querySelector("#ok");
+					if (ok) ok.onclick = () => { M.hidden = true; res(sel.slice()); };
+				};
+				paint();
+			});
+		}
+		const sel = (P, l, n, t, exact) => P.ai ? l.slice(0, n) : choose(t, l, n, exact);
+		const ask = async (P, t) => P.ai || (await choose(t, [{ c: { name: "はい" } }, { c: { name: "いいえ" } }]))[0].c.name === "はい";
+		const pickMon = async (P, list, t, enemy) => !list.length ? null : P.ai ? (enemy ? list.slice().sort((a, b) => hpLeft(a) - hpLeft(b))[0] : list[0]) : (await choose(t, list))[0];
+
+		// 効果テキストの解釈
+		const strip = t => (t || "").replace(/［[^］]*］/g, "").replace(/（[^）]*）/g, "");
+		const sents = t => strip(t).split(/[。\n]/).map(x => x.trim()).filter(Boolean);
+
+		function term(w) {
+			w = w.trim().replace(/^「(.+)」$/, "$1");
+			const ty = w.match(/^\{(\w+)\}(ポケモン|基本エネルギー)$/);
+			if (ty) return ty[2] === "ポケモン" ? x => x.c.kind === "pokemon" && N(x.c.type) === N(ty[1]) : x => x.c.basic && N(x.c.provides) === N(ty[1]);
+			const m = {
+				"ポケモン": x => x.c.kind === "pokemon", "たねポケモン": x => isB(x.c), "進化ポケモン": x => x.c.kind === "pokemon" && !isB(x.c),
+				"ポケモンex": x => x.c.kind === "pokemon" && /ex$/.test(x.c.name),
+				"サポート": x => x.c.subtype === "サポート", "グッズ": x => x.c.subtype === "グッズ", "スタジアム": x => x.c.subtype === "スタジアム",
+				"ポケモンのどうぐ": x => x.c.subtype === "ポケモンのどうぐ", "トレーナーズ": x => x.c.kind === "trainer",
+				"基本エネルギー": x => x.c.basic, "エネルギー": x => x.c.kind === "energy", "好きなカード": () => true, "カード": () => true
+			}[w];
+			return m || (x => x.c.name.includes(w));
+		}
+		const filt = w => { const fs = w.split("または").map(term); return x => fs.some(f => f(x)); };
+
+		function gate(text, P, off) {
+			const t = strip(text), O = S.p[1 - idx(P)];
+			let k;
+			if ((k = t.match(/自分の手札を(\d+)枚トラッシュしなければ使えない/)) && P.hand.length - off < +k[1]) return false;
+			if (/前の相手の番に、自分のポケモンがきぜつしていなければ使えない/.test(t) && P.kod !== S.t - 1) return false;
+			if (/前の相手の番に、自分のポケモンがきぜつしていたなら/.test(t) && P.kod !== S.t - 1) return false;
+			if ((k = t.match(/名前に「(.+?)」とつく特性を使っていたなら/)) && Object.keys(P.ab).some(x => x.includes(k[1]))) return false;
+			if (/相手のベンチポケモンを1匹選び、バトルポケモンと入れ替える/.test(t) && !O.bench.length) return false;
+			return true;
+		}
+
+		async function promote(P) {
+			if (!P.bench.length) return win(1 - idx(P), "場にポケモンがいない");
+			const nm = P.ai ? P.bench.slice().sort((a, b) => b.en.length - a.en.length)[0] : (await choose("新しいバトルポケモン", P.bench))[0];
+			P.bench.splice(P.bench.indexOf(nm), 1); P.act = nm;
+		}
+		async function bounce(P, m) {
+			P.hand.push(m.u, ...m.under, ...m.en, ...(m.tool ? [m.tool] : []));
+			if (m === P.act) { P.act = null; await promote(P); } else P.bench.splice(P.bench.indexOf(m), 1);
+		}
+
+		// 1文ずつ効果を実行 未対応は偽
+		async function fx(s, c) {
+			const { P, O } = c; let k;
+			s = s.replace(/^(そして|その後、)/, "");
+			if (/^その場合、/.test(s)) { if (!c.opt) return true; s = s.replace(/^その場合、/, ""); }
+			if ((k = s.match(/^のぞむなら、(.+)$/))) { c.opt = await ask(P, "この効果を使う？"); return c.opt ? fx(k[1], c) : true; }
+			if ((k = s.match(/^コインを1回投げ、(オモテ|ウラ)なら、(.+)$/))) { const h = flip(); log(`コイン: ${h ? "オモテ" : "ウラ"}`); return h === (k[1] === "オモテ") ? fx(k[2], c) : true; }
+			if ((k = s.match(/^このカードは、自分の手札を(\d+)枚トラッシュしなければ使えない$/))) {
+				const ds = await sel(P, P.hand, +k[1], "トラッシュする手札", true);
+				P.hand = P.hand.filter(x => !ds.includes(x)); P.dis.push(...ds); return true;
+			}
+			if ((k = s.match(/^自分の山札を(\d+)枚引く$/))) { draw(P, +k[1]); return true; }
+			if ((k = s.match(/^自分は(\d+)枚、相手は(\d+)枚、山札を引く$/))) { draw(P, +k[1]); draw(O, +k[2]); return true; }
+			if ((k = s.match(/^(?:それぞれ|おたがいに)山札を(\d+)枚引く$/))) { draw(P, +k[1]); draw(O, +k[1]); return true; }
+			if ((k = s.match(/^自分の手札が(\d+)枚になるまで山札を引く$/))) { draw(P, Math.max(0, +k[1] - P.hand.length)); return true; }
+			if (/^おたがいのプレイヤーは、それぞれ手札をすべて山札にもどして切る$/.test(s)) { for (const X of [P, O]) { X.deck.push(...X.hand.splice(0)); sh(X.deck); } return true; }
+			if (/^自分の手札をすべて山札にもどして切る$/.test(s)) { P.deck.push(...P.hand.splice(0)); sh(P.deck); return true; }
+			if ((k = s.match(/^自分の手札をすべてトラッシュし、山札を(\d+)枚引く$/))) { P.dis.push(...P.hand.splice(0)); draw(P, +k[1]); return true; }
+			if ((k = s.match(/^自分の(山札|トラッシュ)から(.+?)を(\d+)枚(?:まで)?選び、(?:相手に見せて、)?手札に加える$/))) {
+				const src = k[1] === "山札" ? P.deck : P.dis, l = src.filter(filt(k[2]));
+				const g = await sel(P, l, +k[3], `${fmt(k[2])}を選ぶ`, false);
+				g.forEach(x => src.splice(src.indexOf(x), 1)); P.hand.push(...g); log(`${g.length}枚を手札に加えた`); return true;
+			}
+			if ((k = s.match(/^自分の山札から(.+?)を(\d+)枚まで選び、ベンチに出す$/))) {
+				const l = P.deck.filter(filt(k[1])).filter(x => isB(x.c));
+				const g = await sel(P, l, Math.min(+k[2], 5 - P.bench.length), "ベンチに出す", false);
+				g.forEach(x => { P.deck.splice(P.deck.indexOf(x), 1); P.bench.push(mk(P, x)); }); return true;
+			}
+			if (/^山札を切る$/.test(s)) { sh(P.deck); return true; }
+			if ((k = s.match(/^自分の山札から好きなカードを(\d+)枚選ぶ$/))) { c.top = await sel(P, P.deck, +k[1], "山札の上に置くカード", true); return true; }
+			if (/^残りの山札を切り、選んだカードを好きな順番に入れ替えて、山札の上にもどす$/.test(s)) {
+				const t = c.top || []; t.forEach(x => P.deck.splice(P.deck.indexOf(x), 1)); sh(P.deck); P.deck.unshift(...t); return true;
+			}
+			if (/^相手のベンチポケモンを1匹選び、バトルポケモンと入れ替える$/.test(s)) { const m = await pickMon(P, O.bench, "相手のベンチから選ぶ", true); if (m) swap(O, m); return true; }
+			if (/^自分のベンチポケモンを1匹選び、バトルポケモンと入れ替える$/.test(s)) { const m = await pickMon(P, P.bench, "入れ替え先", false); if (m) swap(P, m); return true; }
+			if (/^このポケモンをベンチポケモンと入れ替える$/.test(s)) { const m = await pickMon(P, P.bench, "入れ替え先", false); if (m && c.m === P.act) swap(P, m); return true; }
+			if (/^このポケモンをバトルポケモンと入れ替える$/.test(s)) { if (c.m !== P.act) swap(P, c.m); return true; }
+			if ((k = s.match(/^相手の(ベンチ)?ポケモン1匹にも?、(\d+)ダメージ$/))) {
+				const m = await pickMon(P, k[1] ? O.bench : mons(O), "ダメージを与える相手", true);
+				if (m) { m.d += +k[2]; log(`${m.c.name}に${k[2]}ダメージ`); } return true;
+			}
+			if ((k = s.match(/^相手のベンチポケモン全員に、(\d+)ダメージ$/))) { O.bench.forEach(m => m.d += +k[1]); log(`相手のベンチ全員に${k[1]}ダメージ`); return true; }
+			if ((k = s.match(/^このポケモンにも、?(\d+)ダメージ$/))) { c.m.d += +k[1]; log(`${c.m.c.name}に${k[1]}ダメージ`); return true; }
+			if ((k = s.match(/^このポケモンについているエネルギーを(\d+)個選び、(山札にもどして切る|手札にもどす|トラッシュする?)$/))) {
+				const g = await sel(P, c.m.en, +k[1], "エネルギーを選ぶ", true);
+				c.m.en = c.m.en.filter(x => !g.includes(x));
+				if (k[2][0] === "山") { P.deck.push(...g); sh(P.deck); } else if (k[2][0] === "手") P.hand.push(...g); else P.dis.push(...g);
+				return true;
+			}
+			if ((k = s.match(/^相手のバトルポケモンについているエネルギーを(\d+)個選び、相手の(山札にもどして切る|トラッシュ)$/))) {
+				const a = O.act, g = await sel(P, a.en, +k[1], "相手のエネルギーを選ぶ", true);
+				a.en = a.en.filter(x => !g.includes(x));
+				if (k[2][0] === "山") { O.deck.push(...g); sh(O.deck); } else O.dis.push(...g);
+				return true;
+			}
+			if (/^自分の場のポケモンについている基本エネルギーを1個選び、自分の別のポケモンにつけ替える$/.test(s)) {
+				const a = await pickMon(P, mons(P).filter(m => m.en.some(e => e.c.basic)), "エネルギーを外すポケモン", false);
+				if (!a) return true;
+				const e = (await sel(P, a.en.filter(x => x.c.basic), 1, "つけ替えるエネルギー", true))[0];
+				const b = await pickMon(P, mons(P).filter(m => m !== a), "つけ替え先", false);
+				if (e && b) { a.en.splice(a.en.indexOf(e), 1); b.en.push(e); } return true;
+			}
+			if ((k = s.match(/^自分のトラッシュから基本エネルギーを(\d+)枚(?:まで)?選び、自分のポケモン(?:1匹)?につける$/))) {
+				const g = await sel(P, P.dis.filter(x => x.c.basic), +k[1], "つけるエネルギー", false);
+				const t = g.length ? await pickMon(P, mons(P), "つける先", false) : null;
+				if (t) g.forEach(x => { P.dis.splice(P.dis.indexOf(x), 1); t.en.push(x); }); return true;
+			}
+			if ((k = s.match(/^(このポケモン|自分のポケモン1匹)の(?:HP|ＨＰ)を(\d+)回復$/))) {
+				const t = k[1] === "このポケモン" ? c.m : await pickMon(P, mons(P), "回復するポケモン", false);
+				if (t) t.d = Math.max(0, t.d - +k[2]); return true;
+			}
+			if (/^このポケモンと、ついているすべてのカードを、手札にもどす$/.test(s)) { await bounce(P, c.m); return true; }
+			if (/^次の自分の番、このポケモンはワザが使えない$/.test(s)) { c.m.lock = P.turns + 1; return true; }
+			if (/^次の相手の番、このワザを受けたポケモンは、にげられない$/.test(s)) { if (O.act) O.act.nr = O.turns + 1; return true; }
+			if ((k = s.match(/^相手のバトルポケモンを(.+)にする$/))) {
+				for (const w of k[1].split("と")) if (SCN[w] && O.act) { O.act.sc[SCN[w]] = 1; log(`${O.act.c.name}が${w}になった`); }
+				return true;
+			}
+			if (/(追加|数×\d+ダメージ|その枚数×\d+ダメージ|使える|使えない)$|^(グッズ|サポート|スタジアム|ポケモンのどうぐ)は、|^このポケモンがバトル場にいるなら/.test(s)) return true;
+			return false;
+		}
+		async function runFx(text, c) {
+			const u = [];
+			for (const s of sents(text)) if (!(await fx(s, c))) u.push(s);
+			if (u.length) log(`（未対応の効果: ${fmt(u.join("。")).slice(0, 70)}）`);
+		}
+
+		// カード固有
+		const SP = {
+			"アカマツ": async c => {
+				const P = c.P, seen = new Set(), l = P.deck.filter(x => x.c.basic && !seen.has(x.c.provides) && seen.add(x.c.provides));
+				const g = await sel(P, l, 2, "別タイプの基本エネルギーを2枚まで", false);
+				if (!g.length) return;
+				g.forEach(x => P.deck.splice(P.deck.indexOf(x), 1)); sh(P.deck);
+				const h = P.ai ? g[0] : (await choose("手札に加える", g))[0];
+				P.hand.push(h);
+				const r = g.find(x => x !== h);
+				if (r) { const t = await pickMon(P, mons(P), "エネルギーをつける先", false); t.en.push(r); }
+			}
+		};
+
+		// ダメージ計算
+		async function calc(at, c) {
+			const { P, O, m } = c, d = O.act;
+			let x = at.damage ? (at.damage.mod === "×" ? 0 : at.damage.base) : 0, k;
+			const side = w => w === "おたがいの" ? [m, d] : w === "相手の" ? [d] : [m];
+			for (const s of sents(at.text)) {
+				if ((k = s.match(/^相手のバトルポケモンが「(.+?)」なら、(\d+)ダメージ追加$/))) { if (term(k[1])({ c: d.c })) x += +k[2]; }
+				else if ((k = s.match(/^ウラが出るまでコインを投げ、オモテの数×(\d+)ダメージ(?:追加)?$/))) { let h = 0; while (flip()) h++; log(`オモテ${h}回`); x += h * k[1]; }
+				else if ((k = s.match(/^コインを(\d+)回投げ、オモテの数×(\d+)ダメージ(?:追加)?$/))) { let h = 0; for (let i = 0; i < +k[1]; i++) if (flip()) h++; log(`オモテ${h}回`); x += h * k[2]; }
+				else if ((k = s.match(/^(おたがいの|相手の|自分の)バトルポケモンについているエネルギーの数×(\d+)ダメージ(?:追加)?$/))) x += side(k[1]).reduce((a, y) => a + y.en.length, 0) * k[2];
+				else if ((k = s.match(/^このポケモンについているエネルギーの数×(\d+)ダメージ(?:追加)?$/))) x += m.en.length * k[1];
+				else if ((k = s.match(/^(おたがいの|相手の|自分の)ベンチポケモンの数×(\d+)ダメージ(?:追加)?$/))) x += (k[1] === "おたがいの" ? P.bench.length + O.bench.length : k[1] === "相手の" ? O.bench.length : P.bench.length) * k[2];
+				else if ((k = s.match(/ポケモンについている基本エネルギーを好きなだけトラッシュし、その枚数×(\d+)ダメージ$/))) {
+					let n = 0;
+					for (const y of mons(P)) { const b = y.en.filter(e => e.c.basic); y.en = y.en.filter(e => !e.c.basic); P.dis.push(...b); n += b.length; }
+					x += n * k[1];
+				}
+			}
+			return x;
+		}
+
+		async function takePrize(oi, m) {
+			const O = S.p[oi], n = Math.min(m.c.prize || 1, O.prize.length);
+			S.p[1 - oi].kod = S.t;
+			O.hand.push(...O.prize.splice(0, n)); log(`サイドを${n}枚とった`);
+			if (!O.prize.length) win(oi, "サイドを取り切った");
+		}
+		async function sweep() {
+			for (const i of [1 - S.cur, S.cur]) {
+				const P = S.p[i];
+				for (const m of [...P.bench]) {
+					if (m.d < m.c.hp) continue;
+					log(`${m.c.name}がきぜつ`); P.bench.splice(P.bench.indexOf(m), 1); trash(P, m);
+					await takePrize(1 - i, m);
+					if (S.win != null) return;
+				}
+				if (P.act && P.act.d >= P.act.c.hp) {
+					const m = P.act; log(`${m.c.name}がきぜつ`); trash(P, m); P.act = null;
+					await takePrize(1 - i, m);
+					if (S.win != null) return;
+					await promote(P);
+				}
+				if (S.win != null) return;
+			}
+		}
+		function win(i, why) { S.win = i; log(`${i ? "AI" : "あなた"}の勝ち（${why}）`); R(); }
+
+		async function attack(pi, ai) {
+			const P = S.p[pi], O = S.p[1 - pi], a = P.act, at = a.c.attacks[ai], d = O.act, cx = { P, O, m: a };
+			log(`${a.c.name}の「${at.name}」`);
+			if (a.sc.conf && !flip()) { a.d += 30; log("こんらんでワザに失敗。30ダメージ"); await sweep(); if (S.win == null) await endTurn(); return; }
+			const x = await calc(at, cx);
+			if (x > 0 && d) {
+				const w = d.c.weakness, r = d.c.resistance;
+				let y = x;
+				if (w && N(w.type) === N(a.c.type)) y *= w.value || 2;
+				if (r && N(r.type) === N(a.c.type)) y += r.value;
+				y = Math.max(0, y); d.d += y; log(`${d.c.name}に${y}ダメージ`);
+			}
+			await runFx(at.text, cx);
+			await sweep();
+			if (S.win == null) await endTurn();
+		}
+
+		// ポケモンチェック
+		async function checkup() {
+			for (const P of S.p) {
+				const m = P.act;
+				if (!m) continue;
+				if (m.sc.poison) m.d += 10;
+				if (m.sc.burn) { m.d += 20; if (flip()) delete m.sc.burn; }
+				if (m.sc.sleep && flip()) delete m.sc.sleep;
+				if (m.sc.para && P === cur()) delete m.sc.para;
+			}
+			await sweep();
+		}
+		function beginTurn() {
+			if (S.win != null) return;
+			const P = cur();
+			S.t++; P.turns++; P.en = P.sup = P.ret = 0; P.ab = {};
+			if (!draw(P)) return win(1 - S.cur, "山札切れ");
+			log(`--- ${S.cur ? "AI" : "あなた"}の番 ---`);
+			R();
+			if (P.ai) setTimeout(aiTurn, 600);
+		}
+		async function endTurn() {
+			if (S.win != null) return;
+			await checkup();
+			if (S.win != null) return;
+			S.cur = 1 - S.cur; beginTurn();
+		}
+
+		// 手札を使う
+		async function bench(P, h) { benchIt(P, h); await onBench(P, P.bench[P.bench.length - 1]); }
+		async function onBench(P, m) {
+			for (const ab of m.c.abilities || []) {
+				if (!/このカードを手札からベンチに出したとき、1回使える/.test(ab.text) || P.ab[ab.name] || !gate(ab.text, P, 0)) continue;
+				if (P.ai || await ask(P, `特性「${ab.name}」を使う？`)) await useAb(P, m, ab);
+			}
+		}
+		const abOk = (P, m, ab) => /使える/.test(ab.text) && !/このカードを手札からベンチに出したとき/.test(ab.text) && !P.ab[ab.name]
+			&& (!/バトル場にいるなら/.test(ab.text) || m === P.act) && gate(ab.text, P, 0);
+		async function useAb(P, m, ab) {
+			P.ab[ab.name] = 1; log(`特性「${ab.name}」`);
+			await runFx(ab.text, { P, O: S.p[1 - idx(P)], m });
+			await sweep();
+		}
+		async function play(h) {
+			const P = cur(), O = opp(), c = h.c, tx = (c.text || []).join("。"), cx = { P, O, m: null };
+			if (c.subtype === "サポート" && P.sup) return;
+			if (c.subtype === "スタジアム" && S.stad && S.stad.h.c.name === c.name) return log("同じスタジアムは出せない");
+			if (!gate(tx, P, 1)) return log(`「${c.name}」は今は使えない`);
+			rm(P, h);
+			log(`「${c.name}」を使った`);
+			if (SP[c.name]) await SP[c.name](cx); else await runFx(tx, cx);
+			if (c.subtype === "サポート") P.sup = 1;
+			if (c.subtype === "スタジアム") { if (S.stad) S.stad.o.dis.push(S.stad.h); S.stad = { h, o: P }; }
+			else if (c.subtype === "ポケモンのどうぐ") {
+				const t = await pickMon(P, mons(P).filter(x => !x.tool), "どうぐをつけるポケモン", false);
+				if (t) { t.tool = h; log("（どうぐの効果は未実装）"); } else P.dis.push(h);
+			} else P.dis.push(h);
+			await sweep();
+		}
+		async function retreat() {
+			const P = cur(), cost = P.act.c.retreat;
+			if (!canRet(P)) return;
+			const [t] = P.ai ? [P.bench[0]] : await choose("入れ替え先", P.bench);
+			const ds = !cost ? [] : P.ai ? P.act.en.slice(0, cost) : await choose(`トラッシュするエネルギー（${cost}枚）`, P.act.en, cost);
+			P.act.en = P.act.en.filter(e => !ds.includes(e)); P.dis.push(...ds);
+			swap(P, t); P.ret = 1; log("にげた");
+		}
+
+		// AI
+		async function aiTurn() {
+			const P = S.p[1], O = S.p[0];
+			if (S.win != null) return;
+			const best = () => Math.max(0, ...P.act.c.attacks.map(a => a.damage ? a.damage.base : 0));
+			for (const h of [...P.hand]) if (isB(h.c) && !full(P)) await bench(P, h);
+			for (const h of [...P.hand]) if (h.c.kind === "pokemon" && !isB(h.c)) { const m = mons(P).find(m => canEvo(P, m, h)); if (m) evolve(P, m, h); }
+			for (const m of mons(P)) for (const a of m.c.abilities || []) if (abOk(P, m, a) && /引く|手札に加える|つける|ベンチに出す/.test(a.text)) await useAb(P, m, a);
+			for (const h of [...P.hand]) {
+				const c = h.c, tx = (c.text || []).join("。");
+				if (c.kind !== "trainer" || !P.hand.includes(h) || (c.subtype === "サポート" && P.sup)) continue;
+				if (!/引く|手札に加える|ベンチに出す|につける|入れ替える|つけ替える/.test(tx)) continue;
+				if (/手札をすべて山札にもどして切る/.test(tx) && P.hand.length > 4) continue;
+				if (/相手のベンチポケモンを1匹選び/.test(tx) && !O.bench.some(m => hpLeft(m) <= best())) continue;
+				if (/自分のベンチポケモンを1匹選び、バトルポケモンと入れ替える/.test(tx)) continue;
+				if (/トラッシュしなければ使えない/.test(tx) && P.hand.length < 4) continue;
+				if (gate(tx, P, 1)) await play(h);
+				if (S.win != null) return;
+			}
+			for (const h of [...P.hand]) if (isB(h.c) && !full(P)) await bench(P, h);
+			const e = P.hand.find(h => h.c.kind === "energy");
+			if (e && !P.en) {
+				const ready = P.act.c.attacks.some(at => pay(P.act, at.cost));
+				attach(P, ready && P.bench.length ? P.bench[0] : P.act, e);
+			}
+			const ok = P.act.c.attacks.map((_, i) => i).filter(i => canAtk(P, i));
+			if (ok.length) {
+				ok.sort((a, b) => (P.act.c.attacks[b].damage?.base || 0) - (P.act.c.attacks[a].damage?.base || 0));
+				await attack(1, ok[0]);
+			} else await endTurn();
+		}
+
+		// 開始
+		async function start() {
+			const md = DECKS.find(d => d.code === $("myDeck").value), ad = DECKS.find(d => d.code === $("aiDeck").value);
+			if (!md || !ad) return msg("デッキがありません");
+			const miss = [...new Set([...md.entries, ...ad.entries].filter(e => !CARDS.has(e.id)).map(e => e.id))];
+			if (miss.length) return msg("cards.json に無いカード: " + miss.join(", "));
+			const build = d => d.entries.flatMap(e => Array.from({ length: e.count }, () => ({ c: CARDS.get(e.id), u: ++uid })));
+			S = { p: [mkP(build(md), 0), mkP(build(ad), 1)], t: 0, cur: 0, first: Math.random() < .5 ? 0 : 1, log: [], win: null, stad: null };
+			for (const P of S.p) {
+				if (!P.deck.some(h => isB(h.c))) return msg("たねポケモンがありません");
+				do { P.deck.push(...P.hand.splice(0)); sh(P.deck); draw(P, 7); } while (!P.hand.some(h => isB(h.c)));
+				P.prize = P.deck.splice(0, 6);
+			}
+			$("setup").hidden = true; $("game").hidden = false;
+			for (const P of S.p) {
+				const bs = P.hand.filter(h => isB(h.c));
+				const a = P.ai ? bs[0] : (await choose("バトルポケモンを選ぶ", bs))[0];
+				rm(P, a); P.act = mk(P, a);
+				const rest = P.hand.filter(h => isB(h.c));
+				const bn = P.ai ? rest.slice(0, 5) : await choose("ベンチに出す（5匹まで）", rest, 5, false);
+				bn.forEach(h => benchIt(P, h));
+			}
+			log(`先攻: ${S.first ? "AI" : "あなた"}`);
+			S.cur = S.first; beginTurn();
+		}
+		try { $("proxy").value = localStorage.getItem("pkproxy") || ""; } catch { }
+		$("proxy").oninput = () => { try { localStorage.setItem("pkproxy", $("proxy").value); } catch { } };
+		$("start").onclick = start;
+
+		// 画像
+		const IMG = new Map(), PEND = new Set();
+		async function load(u) {
+			const p = $("proxy").value.trim();
+			try {
+				const r = await fetch(p ? p + encodeURIComponent(u) : u);
+				if (!r.ok) throw new Error("HTTP " + r.status);
+				IMG.set(u, URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: "image/jpeg" })));
+			} catch (e) {
+				IMG.set(u, "data:,");
+				if (S && !S.imgErr) { S.imgErr = 1; log(`画像の取得に失敗: ${e.message}（プロキシURL: ${p || "未設定"}）`); R(); }
+			}
+			hydrate();
+		}
+		function hydrate() {
+			document.querySelectorAll("img[data-u]").forEach(im => {
+				const u = im.dataset.u, v = IMG.get(u);
+				if (v) { if (im.getAttribute("src") !== v) im.src = v; }
+				else if (!PEND.has(u)) { PEND.add(u); load(u); }
+			});
+		}
+		const img = (c, cls) => `<img ${cls ? `class="${cls}" ` : ""}data-u="${c.image}" alt="${c.name}" title="${c.name}">`;
+
+		// 拡大表示
+		function info(c) {
+			const wk = c.weakness ? `${TL[N(c.weakness.type)]}×${c.weakness.value}` : "なし", rs = c.resistance ? `${TL[N(c.resistance.type)]}${c.resistance.value}` : "なし";
+			return c.kind === "pokemon"
+				? `<p class="sub">HP ${c.hp}　弱点 ${wk}　抵抗力 ${rs}　にげる ${c.retreat}</p>`
+				+ (c.abilities || []).map(a => `<p><b>特性 ${a.name}</b><br>${fmt(a.text)}</p>`).join("")
+				+ c.attacks.map(a => `<p><b>${a.cost.map(t => TL[N(t)]).join("")} ${a.name} ${a.damage ? a.damage.base + (a.damage.mod || "") : ""}</b><br>${fmt(a.text)}</p>`).join("")
+				: (c.text || []).map(t => `<p>${fmt(t).replace(/\n/g, "<br>")}</p>`).join("");
+		}
+		function detail(c, btns, note) {
+			const M = $("modal");
+			M.hidden = false;
+			M.onclick = e => { if (e.target === M) M.hidden = true; };
+			M.innerHTML = `<div class="box dt"><div>${img(c, "big")}</div><div class="side"><h3>${c.name}</h3>${note ? `<p class="sub">${note}</p>` : ""}${info(c)}${btns.map((b, i) => `<div class="opt"><button data-b="${i}" ${b.off ? "disabled" : ""}>${b.l}</button><span class="sub">${b.t || ""}</span></div>`).join("")}<p><button id="cl">閉じる</button></p></div></div>`;
+			M.querySelectorAll("[data-b]").forEach(b => b.onclick = () => { M.hidden = true; act(btns[b.dataset.b].f); });
+			$("cl").onclick = () => { M.hidden = true; };
+			hydrate();
+		}
+		const myTurn = () => S.cur === 0 && S.win == null;
+		function showHand(h) {
+			const P = S.p[0], c = h.c, mine = myTurn();
+			let b;
+			if (c.kind === "energy") b = [{ l: "つける", off: !mine || P.en, f: async () => { const t = await pickMon(P, mons(P), "エネルギーをつける先", false); if (t) attach(P, t, h); } }];
+			else if (isB(c)) b = [{ l: "ベンチに出す", off: !mine || full(P), f: () => bench(P, h) }];
+			else if (c.kind === "pokemon") b = [{ l: "進化させる", off: !mine || !mons(P).some(m => canEvo(P, m, h)), f: async () => { const t = await pickMon(P, mons(P).filter(m => canEvo(P, m, h)), "進化させるポケモン", false); if (t) evolve(P, t, h); } }];
+			else b = [{ l: "使用", off: !mine || (c.subtype === "サポート" && P.sup) || !gate((c.text || []).join("。"), P, 1), f: () => play(h) }];
+			detail(c, b);
+		}
+		function showMon(pi, i) {
+			const P = S.p[pi], m = i < 0 ? P.act : P.bench[i], b = [];
+			if (!m) return;
+			if (pi === 0 && myTurn()) {
+				if (m === P.act) m.c.attacks.forEach((a, k) => b.push({ l: `ワザ: ${a.name} ${a.damage ? a.damage.base + (a.damage.mod || "") : ""}`, off: !canAtk(P, k), t: a.cost.map(t => TL[N(t)]).join(""), f: () => attack(0, k) }));
+				(m.c.abilities || []).forEach(a => b.push({ l: `特性: ${a.name}`, off: !abOk(P, m, a), f: () => useAb(P, m, a) }));
+				if (m === P.act) b.push({ l: `にげる（${m.c.retreat}）`, off: !canRet(P), f: retreat });
+			}
+			const st = Object.keys(m.sc).map(k => SCL[k]).join("");
+			detail(m.c, b, `HP ${hpLeft(m)}/${m.c.hp}　エネルギー ${m.en.map(e => TL[N(e.c.provides || "colorless")]).join("") || "なし"}${st ? "　状態 " + st : ""}${m.tool ? "　どうぐ " + m.tool.c.name : ""}`);
+		}
+
+		// 描画
+		const chips = m => m.en.map(e => `<i class="e">${TL[N(e.c.provides || "colorless")] || "?"}</i>`).join("");
+		const tile = (m, pi, i) => m
+			? `<div class="mon" data-p="${pi}" data-i="${i}">${img(m.c)}<div class="ov"><b>${m.c.name}</b> ${hpLeft(m)}/${m.c.hp}${Object.keys(m.sc).map(k => `<u>${SCL[k]}</u>`).join("")}${m.tool ? "<u>具</u>" : ""}<br>${chips(m)}</div></div>`
+			: `<div class="mon empty">なし</div>`;
+		function field(P, pi, ctl) {
+			const bn = `<div class="bench">${Array.from({ length: 5 }, (_, i) => tile(P.bench[i], pi, i)).join("")}</div>`;
+			const act = `<div class="act">${tile(P.act, pi, -1)}<div class="row" style="flex:1">${ctl}</div></div>`;
+			return `<div class="field"><div class="pile prize">サイド<br><b>${P.prize.length}</b></div><div class="zone">${pi ? bn + act : act + bn}</div><div><div class="pile deck">山札<br><b>${P.deck.length}</b></div><div class="pile" style="margin-top:6px">トラッシュ<br><b>${P.dis.length}</b><br><button data-a="trash" data-p="${pi}">見る</button></div></div></div>`;
+		}
+		function R() {
+			const [me, ai] = S.p;
+			$("bar").innerHTML = `ターン${S.t} ${S.win != null ? `<b>${S.win ? "AIの勝ち" : "あなたの勝ち"}</b> <button data-a="again">もう一度</button>` : S.cur ? "AIの番" : "あなたの番"}${S.stad ? `　スタジアム: ${S.stad.h.c.name}` : ""}`;
+			$("opp").innerHTML = field(ai, 1, `<span class="sub">手札 ${ai.hand.length}枚</span>`);
+			$("mine").innerHTML = field(me, 0, `<span class="sub">カードをクリックでワザ・特性・使用</span><button data-a="end" ${myTurn() && !busy ? "" : "disabled"}>ターン終了</button>`);
+			$("hand").innerHTML = me.hand.map((h, i) => `<div class="c" data-h="${i}">${img(h.c)}${h.c.name}</div>`).join("");
+			$("log").innerHTML = S.log.slice(0, 40).map(x => `<div>${fmt(x)}</div>`).join("");
+			hydrate();
+		}
+
+		async function act(f) {
+			if (busy) return;
+			busy = true;
+			try { await f(); } catch (e) { log("エラー: " + e.message); } finally { busy = false; R(); }
+		}
+		document.addEventListener("click", e => {
+			if (!S || busy) return;
+			const t = e.target.closest("[data-a],[data-h],.mon[data-i]");
+			if (!t) return;
+			const a = t.dataset.a;
+			if (a === "again") return location.reload();
+			if (a === "trash") {
+				const l = S.p[+t.dataset.p].dis, M = $("modal");
+				M.hidden = false; M.onclick = null;
+				M.innerHTML = `<div class="box"><h3>トラッシュ（${l.length}枚）</h3><div>${l.map(x => x.c.name).join("、") || "なし"}</div><p><button id="cl">閉じる</button></p></div>`;
+				$("cl").onclick = () => { M.hidden = true; };
+			} else if (a === "end") { if (myTurn()) act(endTurn); }
+			else if (t.dataset.h !== undefined) showHand(S.p[0].hand[+t.dataset.h]);
+			else if (t.dataset.i !== undefined) showMon(+t.dataset.p, +t.dataset.i);
+		});
+	</script>
+</body>
+
+</html>
